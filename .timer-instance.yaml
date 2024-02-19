@@ -1,0 +1,64 @@
+script:
+
+  - id: switch_on_action_${switch_name}
+    then:
+        - logger.log:
+            format: "[MINOSTON - switch_on_action_${switch_name}] THE switch_on_action_${switch_name} SCRIPT HAS PARAMETERS key_value %d, timer_value %d"
+            args: [ '${key_value}', '${timer_value}' ]
+        - globals.set:
+            id: _current_timer_value
+            value: ${timer_value}
+        - number.set:
+            id: time_remaining
+            value: ${timer_value}
+        - number.set: 
+            id: active_timer_key
+            value: ${key_value}
+        - number.set:
+            id: number_${switch_name}
+            value: ${timer_value}
+        - switch.template.publish:
+            id: switch_${switch_name}
+            state: ON
+        - logger.log:
+            format: "[MINOSTON - switch_on_action_${switch_name}] TIMER SET FOR %d MINUTES. _current_timer_value: ${timer_value}, active_timer_key: ${key_value}, number set number_${switch_name}"
+            args: [ '${timer_value} / 60']
+
+
+switch:
+  - platform: template
+    id: switch_${switch_name}
+    name: ${friendly_name}
+    restore_mode: ALWAYS_OFF
+
+    turn_on_action:
+      - logger.log: "[MINOSTON - switch_${switch_name}.turn_on_action] EXECUTING switch_${switch_name}.turn_on_action"
+      - script.execute:
+          id: switch_on_action_${switch_name}
+      - script.execute:
+          id: turn_off_other_switch
+          other_switch_key: !lambda return int(id(_old_timer_key));
+          this_switch_key: ${key_value}
+
+    turn_off_action:
+      - logger.log: "turn_off_action for switch_${switch_name} called"
+
+      - lambda: |-
+          // Turn off master if this is the switch that was on and it was turned off manually 
+          if ( id(active_timer_key).state == ${key_value})
+            id(master_switch)->turn_off();
+
+      - switch.template.publish:
+          id: switch_${switch_name}
+          state: OFF
+
+
+number:
+  - platform: tuya
+    number_datapoint: ${datapoint_value}
+    internal: true
+    id: number_${switch_name}
+    unit_of_measurement: s
+    min_value: ${timer_value}
+    max_value: ${timer_max}
+    step: 1

@@ -1,0 +1,26 @@
+esphome:
+  name: master-bathroom-timer
+  friendly_name: master-bathroom-fan
+  includes: timer-includes.h
+
+  on_boot: 
+    priority: -100
+    then:
+      - delay: 10s
+      - if:
+          condition:
+            - api.connected:
+          then:
+            - script.execute: turn_off_all_switches
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: ""
+
+ota:
+  password: ""
+
+# Include all the gory bits for making the timer work
+packages:
+  timer_core: !include { file: .timer-core.yaml }

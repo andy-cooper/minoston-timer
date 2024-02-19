@@ -1,0 +1,261 @@
+# YAML core file for Minoston MT-10W in-wall timer switch.
+# Use tuya-cloudcutter to do the initial hack. You can directly flash generic-bk7231n-qfn32-tuya
+# to the board as the initial flash and then update using this config; no need to start with the 
+# kickstart-esphome firmware.
+
+substitutions:
+  _5_mins:  '300'
+  _10_mins: '600'
+  _30_mins: '1800'
+  _60_mins: '3600'
+  _2_hrs:   '7200'
+  _4_hrs:   '14400'
+
+bk72xx:
+  board: generic-bk7231n-qfn32-tuya
+
+# Enable logging
+logger:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: !secret timer_fallback_ssid
+    password: !secret timer_fallback_password 
+
+web_server:
+
+captive_portal:
+
+mdns:
+
+text_sensor:
+  - platform: libretiny
+    version:
+      name: LibreTiny Version
+
+debug:
+  update_interval: 30s
+
+sensor:
+  - platform: uptime
+    name: Uptime
+
+uart:
+  rx_pin: RX1
+  tx_pin: TX1
+  baud_rate: 9600
+
+globals:
+  - id: _current_timer_value
+    type: float
+    restore_value: no
+    initial_value: '0'
+  - id: _old_timer_key
+    type: float
+    restore_value: no
+    initial_value: '0'
+
+script:
+  - id: turn_off_other_switch
+    parameters:
+        other_switch_key: int
+        this_switch_key: int
+    then:
+      - lambda: |-
+            std::unordered_map<float, esphome::template_::TemplateSwitch*> switches;
+            switches = {
+              { 1, id(switch_5_mins)  },
+              { 2, id(switch_10_mins) },
+              { 3, id(switch_30_mins) },
+              { 4, id(switch_60_mins) },
+              { 5, id(switch_2_hrs)   },
+              { 6, id(switch_4_hrs)   }
+            };
+
+            int this_index = this_switch_key;
+            int other_index = other_switch_key;
+            ESP_LOGD("MINOSTON - turn_off_other_switch", "Called with (other_switch_key = %d, this_switch_key = %d)", other_switch_key, this_switch_key);
+            if ( (other_index < 1 || other_index > sizeof(switches) / sizeof(switches[0])) ||
+              (this_index < 1 || this_index > sizeof(switches) / sizeof(switches[0])) ) {
+                ESP_LOGD("MINOSTON - turn_off_other_switch", "invalid other_switch_key %d or this_switch_key %d", other_index, this_index);
+            } else {
+              auto this_switch = switches[this_index];
+              auto other_switch = switches[other_index];
+              if ( other_switch->get_object_id().compare(this_switch->get_object_id()) && other_switch->state ) {
+                ESP_LOGD("MINOSTON - turn_off_other_switch", "TURNING OFF OTHER SWITCH %s", other_switch->get_object_id().c_str());
+                other_switch->turn_off();
+              } else {
+                ESP_LOGD("MINOSTON - turn_off_other_switch", "NO OTHER SWITCHES TO TURN OFF. INDEX IS %s, CURRENT SWITCH IS %s", 
+                  switches[other_index]->get_object_id().c_str(), switches[this_index]->get_object_id().c_str());
+              }
+            }
+
+  - id: turn_off_all_switches
+    then:
+      - lambda: |-
+            esphome::template_::TemplateSwitch *switches[] = {
+                id(switch_5_mins),
+                id(switch_10_mins),
+                id(switch_30_mins),
+                id(switch_60_mins),
+                id(switch_2_hrs),
+                id(switch_4_hrs)
+            };
+
+            ESP_LOGD("MINOSTON  - turn_off_all_switches", "CHECKING IF SWITCHES ARE ON");
+            id(active_timer_key).state = 0;
+            for(int i = 0; i < sizeof(switches)/sizeof(switches[0]); i++)
+              if ( switches[i]->state ) {
+                ESP_LOGD("MINOSTON - turn_off_all_switches", "Switch %s is on. Turning it off", switches[i]->get_object_id().c_str());
+                switches[i]->turn_off();
+              } else {
+                ESP_LOGD("MINOSTON - turn_off_all_switches", "Switch %s is OFF already", switches[i]->get_object_id().c_str());
+              }
+
+            if (id(master_switch)->state) {
+              ESP_LOGD("MINOSTON - turn_off_all_switches", "Master switch is on. Turning it off");
+              id(master_switch)->turn_off();
+            }
+
+            if (id(toggle_always_on)->state) {
+              ESP_LOGD("MINOSTON - turn_off_all_switches", "toggle_always_on switch is on. Turning it off");
+              id(toggle_always_on)->turn_off();
+            }
+
+
+
+tuya:
+  # DPIDs processed from schema model: 00000490i1    
+
+  # Template switches for the values because it seems like the Tuya MCU ignores restore_mode and winds up turning the
+  # switches on when booting, and the on_boot initialization doesn't seem to work, so define some template buttons
+  # that will essentially do the same thing, but not be dependent on the MCU for their initial values.
+
+# use substitution to generate different scripts for each switch, since you can't seem to pass in component IDs to a 
+# method (which would be wonderful). I tried, and basically got a null pointer for it. Sad face.
+packages:
+  switch_5_min:  !include { file: .timer-instance.yaml, vars:  { switch_name : '5_mins',  friendly_name: '5 Minutes',  key_value: '1', timer_value: '300',   timer_max: '301',   datapoint_value: '101'} }
+  switch_10_min: !include { file: .timer-instance.yaml, vars:  { switch_name : '10_mins', friendly_name: '10 Minutes', key_value: '2', timer_value: '600',   timer_max: '601',   datapoint_value: '102'} }
+  switch_30_min: !include { file: .timer-instance.yaml, vars:  { switch_name : '30_mins', friendly_name: '30 Minutes', key_value: '3', timer_value: '1800',  timer_max: '1801',  datapoint_value: '103'} }
+  switch_60_min: !include { file: .timer-instance.yaml, vars:  { switch_name : '60_mins', friendly_name: '60 Minutes', key_value: '4', timer_value: '3600',  timer_max: '3601',  datapoint_value: '104'} }
+  switch_2_hrs:  !include { file: .timer-instance.yaml, vars:  { switch_name : '2_hrs',   friendly_name: '2 Hours',    key_value: '5', timer_value: '7200',  timer_max: '7201',  datapoint_value: '105'} }
+  switch_4_hrs:  !include { file: .timer-instance.yaml, vars:  { switch_name : '4_hrs',   friendly_name: '4 Hours',    key_value: '6', timer_value: '14400', timer_max: '14401', datapoint_value: '106'} }
+
+
+switch:
+  # Main control switch. When it is turned off, ensure that all other timer switches are also off
+  - platform: tuya
+    switch_datapoint: 1
+    id: master_switch
+    name: Master Switch
+    restore_mode: ALWAYS_OFF
+    on_turn_off:
+      then:
+        - script.execute: turn_off_all_switches
+
+
+  - platform: tuya
+    switch_datapoint: 111
+    id: toggle_always_on
+    name: Disable Timer (always on mode)
+    restore_mode: ALWAYS_OFF
+  
+
+number:
+  # Time remaining - useful for displaying somewhere
+  - platform: tuya
+    number_datapoint: 7
+    id: time_remaining
+    name: Time Remaining (s)
+    unit_of_measurement: s
+    min_value: 0
+    max_value: 14400
+    step: 1
+    on_value:
+      then:
+        # When the timer counts down and moves from the domain of one switch's to the next lower
+        # in the numerical sequence, we want to turn that switch on, turn off the original switch
+        # and progress the active timer key. Turns out all I need to do here is progress the
+        # active timer key down the chain, because that will take care of switching the switches. Hehe.
+        - lambda: |-
+            esphome::tuya::TuyaNumber *numbers[] = {
+              id(number_5_mins),
+              id(number_10_mins),
+              id(number_30_mins),
+              id(number_60_mins),
+              id(number_2_hrs),
+              id(number_4_hrs)
+            };
+
+            for(auto i = 0; i < sizeof(numbers)/sizeof(numbers[0]); i++) {
+              if (x == numbers[i]->state)
+                id(active_timer_key)->publish_state(i+1);
+            }
+
+    # Set the brightness of the LEDs
+  - platform: tuya
+    number_datapoint: 107
+    name: LED Brightness
+    min_value: 0
+    max_value: 100
+    step: 1
+
+    # The index of the timer key, 0 == master key, 1..6 are numbered for
+    # 5, 10, 30, 60, 2hrs, 4hrs respectively. Use this on value change to
+    # turn on the appropriate switch for the UX
+  - platform: tuya
+    id: active_timer_key
+    internal: true
+    number_datapoint: 108
+    name: Active Timer Key
+    min_value: 0
+    max_value: 6
+    step: 1
+    on_value: 
+      then:
+        - lambda: |-
+            esphome::template_::TemplateSwitch *switches[] = {
+                (esphome::template_::TemplateSwitch *)0x0,
+                id(switch_5_mins),
+                id(switch_10_mins),
+                id(switch_30_mins),
+                id(switch_60_mins),
+                id(switch_2_hrs),
+                id(switch_4_hrs)
+            };
+
+            ESP_LOGD("MINOSTON - active_timer_key.on_value", "TIMER KEY IS %d", int(id(active_timer_key).state));
+            if (int(id(active_timer_key).state) > 0 && int(id(active_timer_key).state < sizeof(switches)/sizeof(switches[0]))) {
+              ESP_LOGD("MINOSTON - active_timer_key.on_value", "ACTIVE_TIMER_KEY IS IN THE RANGE 1..%d", sizeof(switches)/sizeof(switches[0])-1);
+              if (!switches[int(id(active_timer_key).state)]->state) {
+                switches[int(id(active_timer_key).state)]->turn_on();
+                ESP_LOGD("MINOSTON - active_timer_key.on_value", "TURNED ON SWITCH %s", switches[int(id(active_timer_key).state)]->get_object_id().c_str());
+              
+                if (int(id(_old_timer_key)) != 0 && int(id(_old_timer_key)) != int(id(active_timer_key).state) ) {
+                  ESP_LOGD("MINOSTON - active_timer_key.on_value", "OLD TIMER KEY IS %d, turning off switch %s", int(id(_old_timer_key)), switches[int(id(_old_timer_key))]->get_object_id().c_str());
+                  switches[int(id(_old_timer_key))]->turn_off();
+                }
+                id(_old_timer_key) = id(active_timer_key).state;
+              }
+            }
+
+select:
+  - platform: tuya
+    enum_datapoint: 109
+    name: LED Status Light
+    optimistic: true
+    options:
+      0: "On"
+      1: "Off"
+  - platform: tuya
+    enum_datapoint: 110
+    name: Timer LED
+    optimistic: true
+    options:
+      0: "On"
+      1: "Off"    
+

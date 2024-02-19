@@ -1,2 +1,2 @@
 # minoston-timer
-ESPHome configuration for the Minoston MT10W in-wall smart timer
+ESPHome YAML files for a hacked Minoston MT10W in-wall timer switch
